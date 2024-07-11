@@ -21,7 +21,7 @@ def get_pdf_link(ingredient_id):
     # This function remains the same since it's not fetching data
     url = f"https://cir-reports.cir-safety.org/cir-ingredient-status-report/?id={ingredient_id}"
     response = requests.get(url).text
-    soup = BeautifulSoup(response, "lxml")
+    soup = BeautifulSoup(response)
     tab = soup.find("table")
     attach = tab.find("a")
     pidieffe = attach["href"]
