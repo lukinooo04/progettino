@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
-from bs4 import BeautifulSoup
+import bs4
 import fitz
 import re
 from concurrent.futures import ThreadPoolExecutor
