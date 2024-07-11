@@ -1,5 +1,5 @@
 streamlit
 pandas
-beautifulsoup4
+BeautifulSoup4
 PyMuPDF
 requests
