@@ -18,10 +18,9 @@ def load_json_data(json_path):
 
 @st.cache_data(show_spinner=False)
 def get_pdf_link(ingredient_id):
-    # This function remains the same since it's not fetching data
     url = f"https://cir-reports.cir-safety.org/cir-ingredient-status-report/?id={ingredient_id}"
     response = requests.get(url).text
-    soup = BeautifulSoup(response)
+    soup = BeautifulSoup(response, "lxml")
     tab = soup.find("table")
     attach = tab.find("a")
     pidieffe = attach["href"]
@@ -73,26 +72,37 @@ def extract_noael_and_ld50(text_pages):
     
     return noael_matches, ld50_matches
 
-def extract_noael_ld50_and_DNEL(url):
+def echanoael(zuppa):
+    noael_matches = []
+    div = zuppa.find('div', id='SectionContent')
+    dl = div.find_all('dl')
 
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    text = soup.get_text()
+    for sez in dl:
+        coldx = sez.find_all('dd')
+        for ddtag in coldx:
+            if ddtag.text == "NOAEL":
+                h3 = ddtag.find_previous('h3')
+                nxt = ddtag.find_next('dd')
+                risp = f"Il NOAEL con queste condizioni:  {h3.text} è  {nxt.text}"
+                noael_matches.append(risp)
+    
+    return noael_matches
 
-    noael_pattern = re.compile(r'(.*?NOAEL.*?\d+\.?\d*\s*[a-zA-Z/]+.*?(\.|$))', re.IGNORECASE)
-    ld50_pattern = re.compile(r'(.*?LD50.*?\d+\.?\d*\s*[a-zA-Z/]+.*?(\.|$))', re.IGNORECASE)
-    dnel_pattern = re.compile(r'(.*?DNEL.*?\d+\.?\d*\s*[a-zA-Z/]+.*?(\.|$))', re.IGNORECASE)
+def echadnel(zuppa):
+    dnel_matches = []
+    div = zuppa.find('div', id='SectionContent')
+    dl = div.find_all('dl')
+
+    for sez in dl:
+        coldx = sez.find_all('dd')
+        for ddtag in coldx:
+            if ddtag.text == "DNEL (Derived No Effect Level)":
+                h3 = ddtag.find_previous('h3')
+                nxt = ddtag.find_next('dd')
+                risp = f"Il DNEL con queste condizioni:  {h3.text} è  {nxt.text}"
+                dnel_matches.append(risp)
     
-    noael_matches = noael_pattern.findall(text)
-    ld50_matches = ld50_pattern.findall(text)
-    dnel_matches = dnel_pattern.findall(text)
-    
-    # Extract the first group from each match tuple
-    noael_matches = [match[0] for match in noael_matches]
-    ld50_matches = [match[0] for match in ld50_matches]
-    dnel_matches = [match[0] for match in dnel_matches]
-    
-    return noael_matches, ld50_matches, dnel_matches
+    return dnel_matches
 
 def highlight_numbers(text):
     text = re.sub(r'(\d+,\d+\.?\d*)', r'<b style="color:red;">\1</b>', text)
@@ -124,27 +134,51 @@ def similar(a, b):
 def get_max_similarity(ingredient, json_keys):
     return max(similar(ingredient, key) for key in json_keys)
 
-def display_echa_results(noael_matches, ld50_matches, dnel_matches):
+def display_echa_results(noael_matches, dnel_matches):
     if noael_matches:
         with st.expander("Mostra tabella NOAEL (ECHA)", expanded=False):
             st.write("### Valori NOAEL trovati:")
             noael_df = pd.DataFrame(noael_matches, columns=["NOAEL value"])
             st.write(noael_df.to_html(escape=False, index=False), unsafe_allow_html=True)
-    
-    if ld50_matches:
-        with st.expander("Mostra tabella LD50 (ECHA)", expanded=False):
-            st.write("### Valori LD50 trovati:")
-            ld50_df = pd.DataFrame(ld50_matches, columns=["LD50 value"])
-            st.write(ld50_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
     if dnel_matches:
-        with st.expander("Mostra tabella dnel (ECHA)", expanded=False):
+        with st.expander("Mostra tabella DNEL (ECHA)", expanded=False):
             st.write("### Valori dnel trovati:")
-            dnel_df = pd.DataFrame(dnel_matches, columns=["LD50 value"])
+            dnel_df = pd.DataFrame(dnel_matches, columns=["DNEL value"])
             st.write(dnel_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-    if not noael_matches and not ld50_matches:
+    if not noael_matches and not dnel_matches:
         st.write("Nessun valore NOAEL o LD50 trovato per ECHA.")
+
+def ldpub(jsondata):
+    result = []
+    for section in jsondata["Record"]["Section"]:
+        if "Section" in section:
+            for subsection in section["Section"]:
+                for info in subsection["Information"]:
+                    if "Value" in info and "StringWithMarkup" in info["Value"]:
+                        for item in info["Value"]["StringWithMarkup"]:
+                            if item["String"].startswith("LD50"):
+                                result.append(item["String"])
+    return result
+
+def display_ld_results(l_matches):
+    if l_matches:
+        with st.expander("Mostra tabella LD50 (PubChem)", expanded=False):
+            st.write("### Valori LD50 trovati:")
+            l_df = pd.DataFrame(l_matches, columns=["LD50 value"])
+            st.write(l_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    if not l_matches:
+        st.write("Nessun valore LD50 trovato per PubChem.")
+
+# Load the JSON files once
+json_path = "cirjs.json"
+data = load_json_data(json_path)
+json_epath = "invecchia.json"
+echa = load_json_data(json_epath)
+json_ppath = "pubchem.json"
+pub = load_json_data(json_ppath)
 
 def main():
     st.set_page_config(page_title="CIR Ingredient Report", layout="wide")
@@ -154,11 +188,6 @@ def main():
     
     st.write("### Caricamento dati...")
 
-    # Load the JSON file directly from the directory
-    json_path = "cirjs.json"
-    data = load_json_data(json_path)
-    json_epath = "invecchia.json"
-    echa = load_json_data(json_epath)
     st.write("Dati caricati con successo!")
     
     ingredient = st.selectbox("Scrivi il nome dell'ingrediente", [""] + list(data.keys()), index=0)
@@ -200,26 +229,50 @@ def main():
     
         cleani = re.sub(r'[^\w\s]', '', ingredient)
         words = cleani.split()
-        ecing = []
-        for word in words:
-            w = find_keys_with_word(echa, word)
-            ecing.append(w)
-        fl = list(chain(*ecing))       
-        sorted_ingredients = sorted(fl, key=lambda x: get_max_similarity(ingredient, [x]), reverse=True)
+        
+        # Search in ECHA and PubChem using ThreadPoolExecutor
+        with ThreadPoolExecutor() as executor:
+            echa_futures = [executor.submit(find_keys_with_word, echa, word) for word in words]
+            pub_futures = [executor.submit(find_keys_with_word, pub, word) for word in words]
+            echa_results = list(chain(*[future.result() for future in echa_futures]))
+            pub_results = list(chain(*[future.result() for future in pub_futures]))
+
+        echa_results = set(echa_results)
+        sorted_echa_ingredients = sorted(echa_results, key=lambda x: get_max_similarity(ingredient, [x]), reverse=True)
         st.write("")
         st.write("Ingredienti echa con un nome simile")
-        ingecha = st.selectbox("Ing Echa", [""] + list(sorted_ingredients), index=0) 
+        ingecha = st.selectbox("Ing Echa", [""] + list(sorted_echa_ingredients), index=0)
         if ingecha:
             urlecha = echa.get(ingecha)
             if urlecha:
-                echalink = "https://echa.europa.eu/it/registration-dossier/-/registered-dossier/"+str(urlecha)+"/7/1"
+                echalink = f"https://echa.europa.eu/it/registration-dossier/-/registered-dossier/{urlecha}/7/1"
                 st.write(f"Link al dossier Echa: [Clicca qui per visualizzare il dossier]({echalink})")
                 if st.button("Estrai valori Echa"):
-                    noael_echa, ld50_echa, dnel_echa = extract_noael_ld50_and_DNEL(echalink)
-                    noael_matches = [(highlight_numbers(noael),) for noael in noael_echa]
-                    ld50_matches = [(highlight_numbers(ld50),) for ld50 in ld50_echa]
-                    dnel_matches = [(highlight_numbers(dnel),) for dnel in dnel_echa]
-                    display_echa_results(noael_matches, ld50_matches, dnel_matches)
+                    response = requests.get(echalink)
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    dl = echadnel(soup)
+                    nl = echanoael(soup)
+
+                    noael_matches = [(highlight_numbers(noael),) for noael in nl]
+                    dnel_matches = [(highlight_numbers(dnel),) for dnel in dl]
+                    display_echa_results(noael_matches, dnel_matches)
+
+        pub_results = set(pub_results)
+        sorted_pub_ingredients = sorted(pub_results, key=lambda x: get_max_similarity(ingredient, [x.lower()]), reverse=True)
+        st.write("")
+        st.write("Ingredienti pubchem con un nome simile")
+        ingpub = st.selectbox("Ing Pub", [""] + list(sorted_pub_ingredients), index=0)
+        if ingpub:
+            urlpub = pub.get(ingpub)
+            if urlpub:
+                publink = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/annotation/{urlpub}/JSON/?toc=Hazardous%20Substances%20Data%20Bank%20(HSDB)+TOC&heading=Non+Human+Toxicity+Values+(Complete)"
+                st.write(f"Link al dossier PubChem: [Clicca qui per visualizzare il dossier]({publink})")
+                if st.button("Estrai valori PubChem"):
+                    txt = requests.get(publink).text
+                    pubj = json.loads(txt)
+                    ris = ldpub(pubj)
+                    l_matches = [(highlight_numbers(ld),) for ld in ris]
+                    display_ld_results(l_matches)
 
 if __name__ == "__main__":
     main()
